@@ -1,55 +1,42 @@
-name: CI Pipeline
+name: CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   build_and_test:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:latest
-        ports: ["5432:5432"]
-        env:
-          POSTGRES_USER: beksultan
-          POSTGRES_PASSWORD: admin
-          POSTGRES_DB: mydb
-        options: >-
-          --health-cmd "pg_isready -U beksultan"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7
-        ports: ["6379:6379"]
-
     steps:
-      - name: 🔄 Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+      # Егер тесттеріңіз болса, осы жерде іске қосуға болады:
+      # - name: Run tests
+      #   run: pytest
 
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v4
+  deploy:
+    needs: build_and_test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
         with:
-          python-version: "3.10"
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: 📦 Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pytest
+      - name: Build Docker image
+        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/note_api:latest .
 
-      - name: 🧪 Run tests
+      - name: Push Docker image
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/note_api:latest
+
+      - name: Deploy to Render
         env:
-          DATABASE_URL: postgresql+asyncpg://beksultan:admin@localhost/mydb
-          SECRET_KEY: supersecret
-          CELERY_BROKER_URL: redis://localhost:6379/0
-          CELERY_RESULT_BACKEND: redis://localhost:6379/0
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
         run: |
-          pytest
-
-      - name: 🐳 Build Docker image
-        run: |
-          docker build . -t myapp:latest
+          curl -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"serviceId":"srv-d1t013qdbo4c73fpdulg"}' \
+            https://api.render.com/v1/services/srv-d1t013qdbo4c73fpdulg/deploys
